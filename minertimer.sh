@@ -246,14 +246,16 @@ EOF
 
             # Read dialog result
             if [ -f /tmp/minertimer_dialog_result.txt ]; then
-                DIALOG_RESULT=$(cat /tmp/minertimer_dialog_result.txt)
+                # Normalize dialog result to avoid trailing whitespace/newlines
+                DIALOG_RESULT=$(cat /tmp/minertimer_dialog_result.txt | tr -d '\r' | xargs)
                 rm -f /tmp/minertimer_dialog_result.txt
             else
                 DIALOG_RESULT="TIMEOUT"
             fi
+            echo "Dialog result: $DIALOG_RESULT"
 
             # If user clicked "Ask for More Time", start authentication process
-            if [[ $DIALOG_RESULT == "Ask for More Time" ]]; then
+            if [[ $DIALOG_RESULT == "Ask for More Time"* ]]; then
 
                 # Check if Telegram auth is enabled and configured
                 if [ "$ENABLE_TELEGRAM_AUTH" = true ] && [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
@@ -271,14 +273,26 @@ EOF
                     # Send Telegram message with inline keyboard buttons
                     TELEGRAM_MESSAGE="🎮 *MINECRAFT TIME REQUEST*%0A%0A💻 Computer: *${COMPUTER_NAME}*%0A⏰ Time: ${CURRENT_TIME}%0A⏱️  Played today: ${PLAYTIME_MINUTES} minutes%0A➕ Extension: ${EXTENSION_MINUTES} minutes%0A%0A👆 Tap a button to respond:"
 
-                    # Send message with inline keyboard
-                    SEND_RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                    # Send message with inline keyboard (capture HTTP code robustly)
+                    TMP_SEND_BODY=$(mktemp /tmp/minertimer_send_XXXXXX)
+                    SEND_HTTP_CODE=$(curl -s -o "$TMP_SEND_BODY" -w "%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
                         -d "chat_id=${TELEGRAM_CHAT_ID}" \
                         -d "text=${TELEGRAM_MESSAGE}" \
                         -d "parse_mode=Markdown" \
                         -d "reply_markup={\"inline_keyboard\":[[{\"text\":\"✅ Approve ${EXTENSION_MINUTES} min\",\"callback_data\":\"approve_${REQUEST_ID}\"},{\"text\":\"❌ Deny\",\"callback_data\":\"deny_${REQUEST_ID}\"}]]}")
+                    SEND_BODY=$(cat "$TMP_SEND_BODY")
+                    rm -f "$TMP_SEND_BODY"
+                    TELEGRAM_SEND_OK=true
 
-                    echo "Telegram message sent with approval buttons"
+                    if [ "$SEND_HTTP_CODE" = "200" ]; then
+                        echo "Telegram message sent with approval buttons (HTTP $SEND_HTTP_CODE)"
+                    else
+                        echo "Telegram send failed (HTTP $SEND_HTTP_CODE): $SEND_BODY"
+                        osascript -e "display dialog \"⚠️ COULD NOT REACH PARENTS
+
+Please ask a parent directly or try again.\" with title \"⛏️  Minecraft Timer\" buttons {\"OK\"} default button \"OK\" with icon caution giving up after 10"
+                        TELEGRAM_SEND_OK=false
+                    fi
 
                     # Ensure webhook is disabled so getUpdates works; if webhook is set Telegram will ignore polling
                     ensure_telegram_polling_mode
@@ -313,6 +327,7 @@ EOF
                     MAX_POLLS=60
                     POLL_COUNT=0
 
+                    if [ "$TELEGRAM_SEND_OK" = true ]; then
                     while [ $POLL_COUNT -lt $MAX_POLLS ]; do
                         # CRITICAL: Kill any Minecraft instances launched during waiting period
                         kill_minecraft_instances
@@ -428,6 +443,10 @@ PY
 
                         POLL_COUNT=$((POLL_COUNT + 1))
                     done
+                    else
+                        CODE_RESULT="FAILED"
+                        BUTTON_RESULT="FAILED"
+                    fi
 
                     if [ "$VIOLATION_MODE" = true ]; then
                         kill $DIALOG_PID 2>/dev/null
