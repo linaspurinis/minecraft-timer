@@ -85,7 +85,7 @@ sudo ./install_minertimer.sh
 ### 5. Verify Installation
 
 ```bash
-sudo launchctl list | grep com.soferio.minertimer_daily_timer
+sudo launchctl list | grep com.purinis.minecrafttimer
 ```
 
 You should see a line with a process ID.
@@ -158,10 +158,10 @@ Or manually:
 
 ```bash
 # Stop the service
-sudo launchctl unload /Library/LaunchDaemons/com.soferio.minertimer_daily_timer.plist
+sudo launchctl unload /Library/LaunchDaemons/com.purinis.minecrafttimer.plist
 
 # Remove files
-sudo rm /Library/LaunchDaemons/com.soferio.minertimer_daily_timer.plist
+sudo rm /Library/LaunchDaemons/com.purinis.minecrafttimer.plist
 sudo rm -rf /Users/Shared/minertimer
 sudo rm -rf /var/lib/minertimer
 ```
@@ -179,7 +179,7 @@ sudo rm -rf /var/lib/minertimer
 
 ```bash
 # Check if daemon is running
-sudo launchctl list | grep com.soferio.minertimer_daily_timer
+sudo launchctl list | grep com.purinis.minecrafttimer
 
 # Check logs
 tail -f /var/log/system.log | grep minertimer
@@ -194,10 +194,10 @@ tail -f /var/log/system.log | grep minertimer
 
 ```bash
 # Unload (stop)
-sudo launchctl unload /Library/LaunchDaemons/com.soferio.minertimer_daily_timer.plist
+sudo launchctl unload /Library/LaunchDaemons/com.purinis.minecrafttimer.plist
 
 # Load (start)
-sudo launchctl load -w /Library/LaunchDaemons/com.soferio.minertimer_daily_timer.plist
+sudo launchctl load -w /Library/LaunchDaemons/com.purinis.minecrafttimer.plist
 ```
 
 ## Files
@@ -208,7 +208,7 @@ sudo launchctl load -w /Library/LaunchDaemons/com.soferio.minertimer_daily_timer
 - `install_minertimer.sh` - Installation script
 - `uninstall_minertimer.sh` - Uninstallation script
 - `test_telegram.sh` - Test script for authentication flow
-- `com.soferio.minertimer_daily_timer.plist` - LaunchDaemon configuration
+- `com.purinis.minecrafttimer.plist` - LaunchDaemon configuration
 - `TELEGRAM_SETUP.md` - Detailed Telegram setup guide
 
 ## Security Notes
