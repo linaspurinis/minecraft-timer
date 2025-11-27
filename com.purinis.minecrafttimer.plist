@@ -20,5 +20,11 @@ Or can check using: launchctl print system/com.purinis.minecrafttimer
 
     <key>KeepAlive</key>
     <false/>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/minertimer.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/minertimer.error.log</string>
 </dict>
 </plist>

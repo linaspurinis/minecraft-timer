@@ -28,19 +28,23 @@ TELEGRAM_CHAT_ID=""
 # Kill Minecraft using fresh PID lookup to avoid missing relaunches during prompts
 kill_minecraft_instances() {
     local pids
-    # Match both the Minecraft process name and Java processes with -Xdock:name=Minecraft
-    # This catches both native Minecraft and Java-based Minecraft
-    pids=$(ps aux | grep -E "(^[^ ]+ +[0-9]+ .*/java .* -Xdock:name=Minecraft|[M]inecraft)" | grep -v grep | awk '{print $2}')
+    # Match Minecraft processes (works for both native and Java-based Minecraft)
+    # The [M] trick prevents grep from matching itself
+    pids=$(ps aux | grep -iww "[M]inecraft" | awk '{print $2}')
+
     if [ -n "$pids" ]; then
         echo "Killing Minecraft instances: $pids"
         echo "$pids" | xargs kill 2>/dev/null
         sleep 2
+
         # Retry with -9 in case the first signal was ignored
-        pids=$(ps aux | grep -E "(^[^ ]+ +[0-9]+ .*/java .* -Xdock:name=Minecraft|[M]inecraft)" | grep -v grep | awk '{print $2}')
+        pids=$(ps aux | grep -iww "[M]inecraft" | awk '{print $2}')
         if [ -n "$pids" ]; then
             echo "Force killing remaining Minecraft instances: $pids"
             echo "$pids" | xargs kill -9 2>/dev/null
         fi
+    else
+        echo "No Minecraft instances found to kill"
     fi
 }
 
