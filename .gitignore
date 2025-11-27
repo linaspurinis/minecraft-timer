@@ -1,0 +1,10 @@
+# Minecraft Timer - Git Ignore File
+
+# Configuration file with sensitive credentials
+minertimer.config
+
+# Log files
+*.log
+
+# macOS system files
+.DS_Store

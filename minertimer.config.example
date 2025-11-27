@@ -1,0 +1,58 @@
+# Minecraft Timer Configuration File
+#
+# Copy this file to 'minertimer.config' and fill in your actual values
+# DO NOT commit minertimer.config to git (it's in .gitignore)
+
+# ============================================
+# TIME LIMITS (in seconds)
+# ============================================
+# Weekday time limit (default: 1800 = 30 minutes)
+TIME_LIMIT=1800
+
+# Weekend time limit (default: 3600 = 60 minutes)
+WEEKEND_TIME_LIMIT=3600
+
+# Extension time per request (default: 1800 = 30 minutes)
+EXTENSION_TIME=1800
+
+# ============================================
+# WARNINGS
+# ============================================
+# Enable 5-minute warning before time expires
+DISPLAY_5_MIN_WARNING=true
+
+# Enable 1-minute warning before time expires
+DISPLAY_1_MIN_WARNING=true
+
+# ============================================
+# AUTHENTICATION METHODS
+# ============================================
+# Enable admin password as fallback authentication
+REQUIRE_ADMIN_PASSWORD=true
+
+# ============================================
+# TELEGRAM CONFIGURATION
+# ============================================
+# Enable Telegram bot authentication (true/false)
+ENABLE_TELEGRAM_AUTH=true
+
+# Your Telegram Bot Token from @BotFather
+# Get it by messaging @BotFather on Telegram and creating a new bot
+# Example: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+TELEGRAM_BOT_TOKEN=""
+
+# Your Telegram Chat ID
+# For personal chat: message your bot, then visit:
+#   https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
+# For group chat: create a group, add your bot, send a message, then check the URL above
+# Example: "123456789" (personal) or "-987654321" (group, note the minus sign)
+TELEGRAM_CHAT_ID=""
+
+# ============================================
+# NOTES
+# ============================================
+# - Time limits are in seconds (e.g., 1800 = 30 minutes, 3600 = 60 minutes)
+# - Weekend = Saturday and Sunday (days 6 and 7)
+# - Telegram auth is primary, admin password is fallback
+# - If Telegram is disabled, only admin password will be used
+# - See TELEGRAM_SETUP.md for detailed Telegram setup instructions
