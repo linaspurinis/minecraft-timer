@@ -5,7 +5,7 @@ A parental control system for Minecraft Java Edition on macOS that limits daily 
 ## Features
 
 - ⏱️ **Daily Time Limits** - Set different limits for weekdays and weekends
-- 📱 **Telegram Authentication** - Parents approve time extensions remotely via Telegram bot
+- 📱 **One-Tap Telegram Approval** - Parents approve time extensions with a single button tap
 - 🔐 **Fallback Password** - Admin password option when Telegram is unavailable
 - ⏰ **Smart Warnings** - 5-minute and 1-minute warnings before time expires
 - 🎮 **Kid-Friendly UI** - Clean GUI dialogs with clear messages
@@ -16,10 +16,11 @@ A parental control system for Minecraft Java Edition on macOS that limits daily 
 
 1. **Time Limit Reached**: When daily play time expires, a popup appears
 2. **Request More Time**: Child clicks "Ask for More Time"
-3. **Telegram Notification**: Parents receive a message with a 4-digit code
-4. **Code Entry**: Child enters the code (3 attempts)
-5. **Time Granted**: If correct, child gets 30 more minutes
-6. **Fallback Option**: If code fails, admin password can be used
+3. **Telegram Notification**: Parents receive a message with Approve/Deny buttons
+4. **One-Tap Approval**: Parents tap "✅ Approve" or "❌ Deny" button
+5. **Instant Response**: Child sees result immediately (no code entry needed!)
+6. **Time Granted**: If approved, child gets 30 more minutes automatically
+7. **Fallback Option**: If denied or timeout, admin password can be used
 
 ### Example Telegram Message
 
@@ -31,7 +32,18 @@ A parental control system for Minecraft Java Edition on macOS that limits daily 
 ⏱️  Played today: 30 minutes
 ➕ Extension: 30 minutes
 
-🔐 Approval Code: 7382
+👆 Tap a button to respond:
+[✅ Approve 30 min] [❌ Deny]
+```
+
+**Child sees:**
+```
+📱 WAITING FOR PARENT APPROVAL
+
+A message was sent to your parents
+with Approve/Deny buttons.
+
+⏳ Waiting for response...
 ```
 
 ## Installation
@@ -125,14 +137,16 @@ This will:
 ### For Parents
 
 **Approve Time Extension:**
-1. Receive Telegram message with 4-digit code
-2. Decide if you want to approve
-3. Tell child the code (or don't!)
+1. Receive Telegram message with inline buttons
+2. Tap "✅ Approve" to grant time (or "❌ Deny" to decline)
+3. Done! The system responds instantly
 
 **Remotely Monitor:**
 - All requests show computer name, time, and current play time
 - Works from anywhere you have Telegram access
+- One-tap approval from your phone
 - Full audit trail in Telegram chat
+- Each message updates to show "APPROVED" or "DENIED" status
 
 ### For Kids
 
@@ -140,12 +154,13 @@ This will:
 1. Popup appears: "Time Limit Reached"
 2. Click "Ask for More Time"
 3. Message is sent to parents
-4. Enter the 4-digit code parents give you
-5. Get 30 more minutes!
+4. Wait for parent to approve (you'll see a waiting dialog)
+5. Get 30 more minutes automatically when approved!
 
 **Tips:**
-- You have 3 attempts to enter the code
-- If code doesn't work, ask a parent for the admin password
+- No code to enter - parents approve with a button tap
+- Request will timeout after 5 minutes if no response
+- If denied or timeout, you can ask a parent for the admin password
 - Check warnings - you get alerts at 5 min and 1 min remaining
 
 ## Uninstallation
