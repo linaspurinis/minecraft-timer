@@ -238,5 +238,3 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 ## Credits
 
 - Original concept and foundation by [Soferio Pty Limited](https://github.com/soferio/minertimer)
-- Telegram authentication and remote approval system by Linas Purinis
-- Enhanced parental controls and modern UI improvements
