@@ -24,6 +24,8 @@ REQUIRE_ADMIN_PASSWORD=true
 ENABLE_TELEGRAM_AUTH=false
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
+GRACE_EXPIRES_AT=""
+LIMIT_DIALOG_SHOWN=false
 
 # Kill Minecraft using fresh PID lookup to avoid missing relaunches during prompts
 kill_minecraft_instances() {
@@ -75,6 +77,7 @@ fi
 # Directory and file to store total played time for the day
 LOG_DIRECTORY="/var/lib/minertimer"
 LOG_FILE="${LOG_DIRECTORY}/minertimer_playtime.log"
+VIOLATION_FILE="${LOG_DIRECTORY}/minertimer_violation.log"
 
 # Create the directory with restricted permissions (don't throw error if already exists)
 if [ ! -d "$LOG_DIRECTORY" ]; then
@@ -113,15 +116,58 @@ fi
 if [ "$LAST_PLAY_DATE" != "$CURRENT_DATE" ]; then
     TOTAL_PLAYED_TIME=0
     EXTENDED_TIME=0
+    GRACE_EXPIRES_AT=""
+    LIMIT_DIALOG_SHOWN=false
     echo "$CURRENT_DATE" > "$LOG_FILE"
     echo "0" >> "$LOG_FILE"
     echo "0" >> "$LOG_FILE"
     chmod 600 "$LOG_FILE"
+    # Clear violation tracking for new day
+    rm -f "$VIOLATION_FILE"
 fi
+
+# Initialize violation mode flag (re-evaluated inside loop each iteration)
+VIOLATION_MODE=false
 
 while true; do
     
     MINECRAFT_PIDS=$(ps aux | grep -iww "[M]inecraft" | awk '{print $2}')
+    CURRENT_DATE=$(date +%Y-%m-%d)
+    CURRENT_EPOCH=$(date +%s)
+    # Violation file stores the date of the active violation
+    if [ -f "$VIOLATION_FILE" ]; then
+        VIOLATION_DATE=$(head -n 1 "$VIOLATION_FILE")
+        if [ "$VIOLATION_DATE" = "$CURRENT_DATE" ]; then
+            VIOLATION_MODE=true
+        else
+            VIOLATION_MODE=false
+        fi
+    else
+        VIOLATION_MODE=false
+    fi
+
+    # If grace expired and violation not yet active, activate violation for today
+    if [ -n "$GRACE_EXPIRES_AT" ] && [ "$CURRENT_EPOCH" -ge "$GRACE_EXPIRES_AT" ] && [ "$VIOLATION_MODE" = false ]; then
+        echo "$CURRENT_DATE" > "$VIOLATION_FILE"
+        chmod 600 "$VIOLATION_FILE"
+        VIOLATION_MODE=true
+        GRACE_EXPIRES_AT=""
+        echo "Grace expired. Violation mode activated for $CURRENT_DATE"
+    fi
+
+    # If violation active, keep killing Minecraft every minute
+    if [ "$VIOLATION_MODE" = true ]; then
+        if [ -n "$MINECRAFT_PIDS" ]; then
+            echo "Violation active - enforcing shutdown"
+            kill_minecraft_instances
+        fi
+        # Allow the extension dialog to appear even in violation mode
+        LIMIT_DIALOG_SHOWN=false
+        if [ -z "$GRACE_EXPIRES_AT" ]; then
+            GRACE_EXPIRES_AT=$((CURRENT_EPOCH + 300))
+        fi
+        # Do not continue; fall through so the dialog/auth flow can run
+    fi
     # If Minecraft is running
     
     if [ -n "$MINECRAFT_PIDS" ]; then
@@ -133,8 +179,26 @@ while true; do
         # Add any granted extensions to the base limit
         current_limit=$((base_limit + EXTENDED_TIME))
 
-        # If the time limit has been reached, prompt for extension
+        # If the time limit has been reached
         if ((TOTAL_PLAYED_TIME >= current_limit)); then
+            # Start grace countdown if not already running
+            if [ -z "$GRACE_EXPIRES_AT" ]; then
+                GRACE_EXPIRES_AT=$((CURRENT_EPOCH + 300))
+                echo "Time limit reached. Grace period started for 5 minutes."
+            fi
+
+            # If we've already shown the dialog for this overage, skip re-showing it
+            if [ "$LIMIT_DIALOG_SHOWN" = true ]; then
+                # Still within grace; just wait a bit
+                sleep 20
+                TOTAL_PLAYED_TIME=$((TOTAL_PLAYED_TIME + 20))
+                sed -i '' "2s/.*/$TOTAL_PLAYED_TIME/" "$LOG_FILE"
+                continue
+            fi
+            LIMIT_DIALOG_SHOWN=true
+            # Kill current instance before prompting, to enforce the grace window
+            kill_minecraft_instances
+
             # Play sound and show notification
             afplay /System/Library/Sounds/Glass.aiff
             say "Minecraft time has expired"
@@ -143,23 +207,50 @@ while true; do
             PLAYTIME_MINUTES=$((TOTAL_PLAYED_TIME / 60))
             EXTENSION_MINUTES=$((EXTENSION_TIME / 60))
 
-            # Show nice GUI dialog with 5 minute timeout (Minecraft still running during this time)
-            DIALOG_RESULT=$(osascript <<EOF
+            # Show nice GUI dialog with 5 minute timeout (Minecraft already closed)
+            # Run dialog in background so we can monitor for Minecraft relaunches
+            osascript <<EOF > /tmp/minertimer_dialog_result.txt 2>&1 &
 try
-    display dialog "⏰ TIME LIMIT REACHED!
+    set dialogResult to button returned of (display dialog "⏰ TIME LIMIT REACHED!
 
 You've played Minecraft for $PLAYTIME_MINUTES minutes today.
 
 🎮 Want to keep playing?
 Ask a parent for approval!
 
-⏱️  Extension available: $EXTENSION_MINUTES more minutes" with title "⛏️  Minecraft Timer" buttons {"Close Minecraft", "Ask for More Time"} default button "Ask for More Time" with icon caution giving up after 300
-    return button returned of result
+⏱️  Extension available: $EXTENSION_MINUTES more minutes" with title "⛏️  Minecraft Timer" buttons {"Close Minecraft", "Ask for More Time"} default button "Ask for More Time" with icon caution giving up after 300)
+    do shell script "echo " & quoted form of dialogResult & " > /tmp/minertimer_dialog_result.txt"
 on error
-    return "TIMEOUT"
+    do shell script "echo TIMEOUT > /tmp/minertimer_dialog_result.txt"
 end try
 EOF
-)
+            DIALOG_PID=$!
+
+            # Monitor for Minecraft relaunches while waiting for dialog response
+            DIALOG_WAIT_COUNT=0
+            MAX_WAIT=60  # 60 iterations of 5 seconds = 5 minutes
+            while [ $DIALOG_WAIT_COUNT -lt $MAX_WAIT ]; do
+                # Kill any Minecraft instances during waiting period
+                kill_minecraft_instances
+
+                # Check if dialog completed
+                if ! kill -0 $DIALOG_PID 2>/dev/null; then
+                    # Dialog finished, read result
+                    sleep 1  # Give it a moment to write the file
+                    break
+                fi
+
+                sleep 5
+                DIALOG_WAIT_COUNT=$((DIALOG_WAIT_COUNT + 1))
+            done
+
+            # Read dialog result
+            if [ -f /tmp/minertimer_dialog_result.txt ]; then
+                DIALOG_RESULT=$(cat /tmp/minertimer_dialog_result.txt)
+                rm -f /tmp/minertimer_dialog_result.txt
+            else
+                DIALOG_RESULT="TIMEOUT"
+            fi
 
             # If user clicked "Ask for More Time", start authentication process
             if [[ $DIALOG_RESULT == "Ask for More Time" ]]; then
@@ -223,6 +314,19 @@ EOF
                     POLL_COUNT=0
 
                     while [ $POLL_COUNT -lt $MAX_POLLS ]; do
+                        # CRITICAL: Kill any Minecraft instances launched during waiting period
+                        kill_minecraft_instances
+
+                        # If grace expires while waiting, trigger violation immediately
+                        if [ -n "$GRACE_EXPIRES_AT" ] && [ "$(date +%s)" -ge "$GRACE_EXPIRES_AT" ]; then
+                            echo "$CURRENT_DATE" > "$VIOLATION_FILE"
+                            chmod 600 "$VIOLATION_FILE"
+                            VIOLATION_MODE=true
+                            GRACE_EXPIRES_AT=""
+                            echo "Grace expired during approval wait. Violation activated."
+                            break
+                        fi
+
                         # Check if dialog was closed/cancelled
                         if ! kill -0 $DIALOG_PID 2>/dev/null; then
                             BUTTON_RESULT="CANCELLED"
@@ -325,6 +429,16 @@ PY
                         POLL_COUNT=$((POLL_COUNT + 1))
                     done
 
+                    if [ "$VIOLATION_MODE" = true ]; then
+                        kill $DIALOG_PID 2>/dev/null
+                        kill_minecraft_instances
+                        sleep 60
+                        continue
+                    fi
+
+                    # No approval yet; allow the dialog to reappear on next loop within grace
+                    LIMIT_DIALOG_SHOWN=false
+
                     # Close the waiting dialog if still open
                     kill $DIALOG_PID 2>/dev/null
 
@@ -341,17 +455,28 @@ PY
                         current_limit=$((base_limit + EXTENDED_TIME))
                         echo "Extension granted via Telegram button! New limit: $((current_limit / 60)) minutes"
 
+                        # Clear violation mode since time was granted
+                        rm -f "$VIOLATION_FILE"
+                        VIOLATION_MODE=false
+                        GRACE_EXPIRES_AT=""
+                        LIMIT_DIALOG_SHOWN=false
+
                         # Show success dialog
                         osascript -e "display dialog \"✅ TIME EXTENSION GRANTED!
 
 You've been granted $EXTENSION_MINUTES more minutes!
 
-Enjoy your Minecraft adventure! ⛏️\" with title \"⛏️  Minecraft Timer\" buttons {\"Thanks!\"} default button \"Thanks!\" with icon note giving up after 5"
+You can now reopen Minecraft and play! ⛏️\" with title \"⛏️  Minecraft Timer\" buttons {\"Open Minecraft\"} default button \"Open Minecraft\" with icon note giving up after 10"
 
-                        say "Time extension granted. Enjoy!"
+                        say "Time extension granted. You can now reopen Minecraft!"
+
+                        # Open Minecraft for them
+                        open -a Minecraft
                         # Reset warnings for next cycle
                         DISPLAY_5_MIN_WARNING=true
                         DISPLAY_1_MIN_WARNING=true
+                        GRACE_EXPIRES_AT=""
+                        LIMIT_DIALOG_SHOWN=false
                     else
                         # Code failed or timeout - Close Minecraft first
                         echo "Code verification failed. Closing Minecraft..."
@@ -396,6 +521,12 @@ EOF
                                     EXTENDED_TIME=$((EXTENDED_TIME + EXTENSION_TIME))
                                     current_limit=$((base_limit + EXTENDED_TIME))
                                     echo "Extension granted via admin password! New limit: $((current_limit / 60)) minutes"
+
+                                    # Clear violation mode since time was granted
+                                    rm -f "$VIOLATION_FILE"
+                                    VIOLATION_MODE=false
+                                    GRACE_EXPIRES_AT=""
+                                    LIMIT_DIALOG_SHOWN=false
 
                                     # Show success dialog
                                     osascript -e "display dialog \"✅ TIME EXTENSION GRANTED!
@@ -466,14 +597,21 @@ EOF
                         current_limit=$((base_limit + EXTENDED_TIME))
                         echo "Extension granted via admin password! New limit: $((current_limit / 60)) minutes"
 
+                        # Clear violation mode since time was granted
+                        rm -f "$VIOLATION_FILE"
+                        VIOLATION_MODE=false
+
                         # Show success dialog
                         osascript -e "display dialog \"✅ TIME EXTENSION GRANTED!
 
 You've been granted $EXTENSION_MINUTES more minutes!
 
-Enjoy your Minecraft adventure! ⛏️\" with title \"⛏️  Minecraft Timer\" buttons {\"Thanks!\"} default button \"Thanks!\" with icon note giving up after 5"
+You can now reopen Minecraft and play! ⛏️\" with title \"⛏️  Minecraft Timer\" buttons {\"Open Minecraft\"} default button \"Open Minecraft\" with icon note giving up after 10"
 
-                        say "Time extension granted. Enjoy!"
+                        say "Time extension granted. You can now reopen Minecraft!"
+
+                        # Open Minecraft for them
+                        open -a Minecraft
                         # Reset warnings for next cycle
                         DISPLAY_5_MIN_WARNING=true
                         DISPLAY_1_MIN_WARNING=true
@@ -509,6 +647,7 @@ Minecraft has been closed.
 
 See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"} default button \"OK\" with icon note giving up after 5"
                 say "Time limit reached. Minecraft closing."
+                LIMIT_DIALOG_SHOWN=false
             fi 
         elif ((TOTAL_PLAYED_TIME >= current_limit - 300)) && [ "$DISPLAY_5_MIN_WARNING" = true ]; then
             osascript -e 'display notification "Minecraft will exit in 5 minutes" with title "Minecraft Time Expiring Soon"'
@@ -550,10 +689,15 @@ See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"
         EXTENDED_TIME=0
         DISPLAY_5_MIN_WARNING=true
         DISPLAY_1_MIN_WARNING=true
+        GRACE_EXPIRES_AT=""
+        LIMIT_DIALOG_SHOWN=false
         echo "$CURRENT_DATE" > "$LOG_FILE"
         echo "0" >> "$LOG_FILE"
         echo "0" >> "$LOG_FILE"
         chmod 600 "$LOG_FILE"
+        # Clear violation mode for new day
+        rm -f "$VIOLATION_FILE"
+        VIOLATION_MODE=false
         echo "RESET DATE - $CURRENT_DATE"
     fi
 done
