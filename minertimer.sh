@@ -46,32 +46,48 @@ fi
 LOG_DIRECTORY="/var/lib/minertimer"
 LOG_FILE="${LOG_DIRECTORY}/minertimer_playtime.log"
 
-# Create the directory (don't throw error if already exists)
-mkdir -p $LOG_DIRECTORY
+# Create the directory with restricted permissions (don't throw error if already exists)
+if [ ! -d "$LOG_DIRECTORY" ]; then
+    mkdir -p "$LOG_DIRECTORY"
+    chmod 700 "$LOG_DIRECTORY"
+fi
 
 # Get the current date
 CURRENT_DATE=$(date +%Y-%m-%d)
 
-# Read the last play date and total played time from the log file
+# Read the last play date, total played time, and extended time from the log file
+# Log file format: line 1 = date, line 2 = total_played_time, line 3 = extended_time
 if [ -f "$LOG_FILE" ]; then
-    LAST_PLAY_DATE=$(head -n 1 "$LOG_FILE")
-    TOTAL_PLAYED_TIME=$(tail -n 1 "$LOG_FILE")
+    LAST_PLAY_DATE=$(sed -n '1p' "$LOG_FILE")
+    TOTAL_PLAYED_TIME=$(sed -n '2p' "$LOG_FILE")
+    EXTENDED_TIME=$(sed -n '3p' "$LOG_FILE")
+
+    # Validate numeric values
+    if ! [[ "$TOTAL_PLAYED_TIME" =~ ^[0-9]+$ ]]; then
+        TOTAL_PLAYED_TIME=0
+    fi
+    if ! [[ "$EXTENDED_TIME" =~ ^[0-9]+$ ]]; then
+        EXTENDED_TIME=0
+    fi
 else
     LAST_PLAY_DATE="$CURRENT_DATE"
     TOTAL_PLAYED_TIME=0
+    EXTENDED_TIME=0
     echo "$CURRENT_DATE" > "$LOG_FILE"
     echo "0" >> "$LOG_FILE"
+    echo "0" >> "$LOG_FILE"
+    chmod 600 "$LOG_FILE"
 fi
 
- # If it's a new day, or first use, reset the playtime
+ # If it's a new day, or first use, reset the playtime and extensions
 if [ "$LAST_PLAY_DATE" != "$CURRENT_DATE" ]; then
     TOTAL_PLAYED_TIME=0
+    EXTENDED_TIME=0
     echo "$CURRENT_DATE" > "$LOG_FILE"
     echo "0" >> "$LOG_FILE"
+    echo "0" >> "$LOG_FILE"
+    chmod 600 "$LOG_FILE"
 fi
-
-# Initialize the current limit (will be increased if extensions are granted)
-EXTENDED_TIME=0
 
 while true; do
     
@@ -80,9 +96,9 @@ while true; do
     
     if [ -n "$MINECRAFT_PIDS" ]; then
         # Set base limit based on day of week
-        base_limit=TIME_LIMIT
+        base_limit=$TIME_LIMIT
         if [[ $(date +%u) -gt 5 ]]; then
-            base_limit=WEEKEND_TIME_LIMIT
+            base_limit=$WEEKEND_TIME_LIMIT
         fi
         # Add any granted extensions to the base limit
         current_limit=$((base_limit + EXTENDED_TIME))
@@ -97,7 +113,7 @@ while true; do
             PLAYTIME_MINUTES=$((TOTAL_PLAYED_TIME / 60))
             EXTENSION_MINUTES=$((EXTENSION_TIME / 60))
 
-            # Show nice GUI dialog with 5 minute timeout
+            # Show nice GUI dialog with 5 minute timeout (Minecraft still running during this time)
             DIALOG_RESULT=$(osascript <<EOF
 try
     display dialog "⏰ TIME LIMIT REACHED!
@@ -206,7 +222,11 @@ Enjoy your Minecraft adventure! ⛏️\" with title \"⛏️  Minecraft Timer\" 
                         DISPLAY_5_MIN_WARNING=true
                         DISPLAY_1_MIN_WARNING=true
                     else
-                        # Failed - show fallback option or close
+                        # Code failed or timeout - Close Minecraft first
+                        echo "Code verification failed. Closing Minecraft..."
+                        echo $MINECRAFT_PIDS | xargs kill
+
+                        # Now offer fallback option or show final message
                         if [ "$REQUIRE_ADMIN_PASSWORD" = true ]; then
                             # Offer admin password as fallback
                             FALLBACK_CHOICE=$(osascript <<EOF 2>/dev/null
@@ -215,7 +235,7 @@ try
 
 All attempts used or timeout.
 
-Do you have a parent nearby who can enter the admin password instead?" with title "⛏️  Minecraft Timer" buttons {"Close Minecraft", "Enter Admin Password"} default button "Enter Admin Password" with icon caution
+Do you have a parent nearby who can enter the admin password instead?" with title "⛏️  Minecraft Timer" buttons {"Close Minecraft", "Enter Admin Password"} default button "Enter Admin Password" with icon caution giving up after 60
     return button returned of result
 on error
     return "CLOSE"
@@ -251,51 +271,49 @@ EOF
 
 You've been granted $EXTENSION_MINUTES more minutes!
 
-Enjoy your Minecraft adventure! ⛏️\" with title \"⛏️  Minecraft Timer\" buttons {\"Thanks!\"} default button \"Thanks!\" with icon note giving up after 5"
+You can now reopen Minecraft and play! ⛏️\" with title \"⛏️  Minecraft Timer\" buttons {\"Open Minecraft\"} default button \"Open Minecraft\" with icon note giving up after 10"
 
-                                    say "Time extension granted. Enjoy!"
+                                    say "Time extension granted. You can now reopen Minecraft!"
+
+                                    # Open Minecraft for them
+                                    open -a Minecraft
                                     # Reset warnings for next cycle
                                     DISPLAY_5_MIN_WARNING=true
                                     DISPLAY_1_MIN_WARNING=true
                                 else
-                                    echo "Admin password failed. Closing Minecraft..."
-                                    echo $MINECRAFT_PIDS | xargs kill
-
+                                    echo "Admin password failed."
                                     osascript -e "display dialog \"❌ INCORRECT PASSWORD
 
-Minecraft will now close.
+Minecraft has been closed.
 Better luck next time!\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"} default button \"OK\" with icon stop giving up after 5"
-                                    say "Authentication failed. Minecraft closing."
+                                    say "Authentication failed."
                                 fi
                             else
-                                # User chose to close Minecraft
-                                echo "User declined admin password. Closing Minecraft..."
-                                echo $MINECRAFT_PIDS | xargs kill
-
+                                # User chose not to continue
+                                echo "User declined admin password."
                                 osascript -e "display dialog \"⏰ TIME'S UP!
 
-Minecraft is closing now.
+Minecraft has been closed.
 
 See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"} default button \"OK\" with icon note giving up after 5"
-                                say "Time limit reached. Minecraft closing."
+                                say "Time limit reached."
                             fi
                         else
                             # No admin password fallback available
-                            echo "Code verification failed. Closing Minecraft..."
-                            echo $MINECRAFT_PIDS | xargs kill
-
+                            echo "Code verification failed."
                             osascript -e "display dialog \"⏰ TIME'S UP!
 
-Minecraft is closing now.
+Minecraft has been closed.
 
 See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"} default button \"OK\" with icon note giving up after 5"
-                            say "Time limit reached. Minecraft closing."
+                            say "Time limit reached."
                         fi
                     fi
 
                 elif [ "$REQUIRE_ADMIN_PASSWORD" = true ]; then
                     # FALLBACK: Password-only mode (Telegram disabled or not configured)
                     # Use AppleScript to prompt for admin password with nice dialog (5 minute timeout)
+                    # Minecraft stays open during this time (like the Telegram code entry)
                     PASSWORD_RESULT=$(osascript <<EOF 2>/dev/null
 try
     set adminPassword to text returned of (display dialog "🔐 PARENT PASSWORD REQUIRED
@@ -329,35 +347,34 @@ Enjoy your Minecraft adventure! ⛏️\" with title \"⛏️  Minecraft Timer\" 
                         DISPLAY_5_MIN_WARNING=true
                         DISPLAY_1_MIN_WARNING=true
                     else
+                        # Password failed or cancelled - Close Minecraft
                         echo "Authentication failed. Closing Minecraft..."
                         echo $MINECRAFT_PIDS | xargs kill
 
                         osascript -e "display dialog \"❌ INCORRECT PASSWORD
 
-Minecraft will now close.
+Minecraft has been closed.
 Better luck next time!\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"} default button \"OK\" with icon stop giving up after 5"
                         say "Authentication failed. Minecraft closing."
                     fi
                 else
                     # No authentication enabled - should not happen
-                    echo "No authentication method enabled. Closing Minecraft..."
-                    echo $MINECRAFT_PIDS | xargs kill
-
+                    echo "No authentication method enabled."
                     osascript -e "display dialog \"⏰ TIME'S UP!
 
-Minecraft is closing now.
+Minecraft has been closed.
 
 See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"} default button \"OK\" with icon note giving up after 5"
-                    say "Time limit reached. Minecraft closing."
+                    say "Time limit reached."
                 fi
             else
-                # User clicked "Close Minecraft" or timeout
+                # User clicked "Close Minecraft" or timeout on initial dialog
                 echo "Extension denied. Closing Minecraft..."
                 echo $MINECRAFT_PIDS | xargs kill
 
                 osascript -e "display dialog \"⏰ TIME'S UP!
 
-Minecraft is closing now.
+Minecraft has been closed.
 
 See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"} default button \"OK\" with icon note giving up after 5"
                 say "Time limit reached. Minecraft closing."
@@ -376,8 +393,10 @@ See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"
         sleep 20
         TOTAL_PLAYED_TIME=$((TOTAL_PLAYED_TIME + 20))
 
-        # Update the total played time in the log file (Note on mac -i requires extension)
-        sed -i '' "$ s/.*/$TOTAL_PLAYED_TIME/" "$LOG_FILE"
+        # Update the log file with current played time and extensions
+        # Log file format: line 1 = date, line 2 = total_played_time, line 3 = extended_time
+        sed -i '' "2s/.*/$TOTAL_PLAYED_TIME/" "$LOG_FILE"
+        sed -i '' "3s/.*/$EXTENDED_TIME/" "$LOG_FILE"
 
     else
         sleep 10
@@ -402,6 +421,8 @@ See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"
         DISPLAY_1_MIN_WARNING=true
         echo "$CURRENT_DATE" > "$LOG_FILE"
         echo "0" >> "$LOG_FILE"
+        echo "0" >> "$LOG_FILE"
+        chmod 600 "$LOG_FILE"
         echo "RESET DATE - $CURRENT_DATE"
     fi
 done
