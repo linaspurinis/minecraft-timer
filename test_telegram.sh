@@ -213,8 +213,6 @@ PY
                     MESSAGE_ID=$(echo "$PY_OUT" | sed -n '3p')
 
                     echo "   📩 Received callback: '$CALLBACK_DATA'"
-                    echo "   🔍 Looking for: approve_${REQUEST_ID} or deny_${REQUEST_ID}"
-                    echo "   🐛 Length of CALLBACK_DATA: ${#CALLBACK_DATA}"
 
                     # Check if it's our request
                     if [[ $CALLBACK_DATA == "approve_${REQUEST_ID}" ]]; then
