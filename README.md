@@ -39,7 +39,7 @@ A parental control system for Minecraft Java Edition on macOS that limits daily 
 ### 1. Download or Clone
 
 ```bash
-git clone https://github.com/yourusername/minecraft-timer.git
+git clone https://github.com/linaspurinis/minecraft-timer.git
 cd minecraft-timer
 ```
 
