@@ -25,6 +25,21 @@ ENABLE_TELEGRAM_AUTH=false
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
 
+# Kill Minecraft using fresh PID lookup to avoid missing relaunches during prompts
+kill_minecraft_instances() {
+    local pids
+    pids=$(ps aux | grep -iww "[M]inecraft" | awk '{print $2}')
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill 2>/dev/null
+        sleep 2
+        # Retry with -9 in case the first signal was ignored
+        pids=$(ps aux | grep -iww "[M]inecraft" | awk '{print $2}')
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9 2>/dev/null
+        fi
+    fi
+}
+
 # Check if config file exists and load it
 if [ -f "$CONFIG_FILE" ]; then
     echo "Loading configuration from: $CONFIG_FILE"
@@ -224,7 +239,7 @@ Enjoy your Minecraft adventure! ⛏️\" with title \"⛏️  Minecraft Timer\" 
                     else
                         # Code failed or timeout - Close Minecraft first
                         echo "Code verification failed. Closing Minecraft..."
-                        echo $MINECRAFT_PIDS | xargs kill
+                        kill_minecraft_instances
 
                         # Now offer fallback option or show final message
                         if [ "$REQUIRE_ADMIN_PASSWORD" = true ]; then
@@ -349,7 +364,7 @@ Enjoy your Minecraft adventure! ⛏️\" with title \"⛏️  Minecraft Timer\" 
                     else
                         # Password failed or cancelled - Close Minecraft
                         echo "Authentication failed. Closing Minecraft..."
-                        echo $MINECRAFT_PIDS | xargs kill
+                        kill_minecraft_instances
 
                         osascript -e "display dialog \"❌ INCORRECT PASSWORD
 
@@ -370,7 +385,7 @@ See you tomorrow! 👋\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"
             else
                 # User clicked "Close Minecraft" or timeout on initial dialog
                 echo "Extension denied. Closing Minecraft..."
-                echo $MINECRAFT_PIDS | xargs kill
+                kill_minecraft_instances
 
                 osascript -e "display dialog \"⏰ TIME'S UP!
 
