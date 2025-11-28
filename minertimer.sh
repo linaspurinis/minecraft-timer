@@ -498,6 +498,9 @@ PY
                         current_limit=$((base_limit + EXTENDED_TIME))
                         echo "Extension granted via Telegram button! New limit: $((current_limit / 60)) minutes"
 
+                        # CRITICAL: Save EXTENDED_TIME to log file immediately
+                        sed -i '' "3s/.*/$EXTENDED_TIME/" "$LOG_FILE"
+
                         # Clear violation mode since time was granted
                         rm -f "$VIOLATION_FILE"
                         VIOLATION_MODE=false
@@ -564,6 +567,9 @@ EOF
                                     EXTENDED_TIME=$((EXTENDED_TIME + EXTENSION_TIME))
                                     current_limit=$((base_limit + EXTENDED_TIME))
                                     echo "Extension granted via admin password! New limit: $((current_limit / 60)) minutes"
+
+                                    # CRITICAL: Save EXTENDED_TIME to log file immediately
+                                    sed -i '' "3s/.*/$EXTENDED_TIME/" "$LOG_FILE"
 
                                     # Clear violation mode since time was granted
                                     rm -f "$VIOLATION_FILE"
@@ -639,6 +645,9 @@ EOF
                         EXTENDED_TIME=$((EXTENDED_TIME + EXTENSION_TIME))
                         current_limit=$((base_limit + EXTENDED_TIME))
                         echo "Extension granted via admin password! New limit: $((current_limit / 60)) minutes"
+
+                        # CRITICAL: Save EXTENDED_TIME to log file immediately
+                        sed -i '' "3s/.*/$EXTENDED_TIME/" "$LOG_FILE"
 
                         # Clear violation mode since time was granted
                         rm -f "$VIOLATION_FILE"
