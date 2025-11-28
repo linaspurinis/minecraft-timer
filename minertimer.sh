@@ -208,8 +208,12 @@ while true; do
             EXTENSION_MINUTES=$((EXTENSION_TIME / 60))
 
             # Show nice GUI dialog with 5 minute timeout (Minecraft already closed)
-            # Run dialog in background so we can monitor for Minecraft relaunches
-            osascript <<EOF > /tmp/minertimer_dialog_result.txt 2>&1 &
+            # Use a temp file to store result, and run dialog with timeout
+            RESULT_FILE="/tmp/minertimer_dialog_$$_$(date +%s).txt"
+            rm -f "$RESULT_FILE"
+
+            # Run dialog in background
+            (osascript <<EOF
 try
     set dialogResult to button returned of (display dialog "⏰ TIME LIMIT REACHED!
 
@@ -219,24 +223,45 @@ You've played Minecraft for $PLAYTIME_MINUTES minutes today.
 Ask a parent for approval!
 
 ⏱️  Extension available: $EXTENSION_MINUTES more minutes" with title "⛏️  Minecraft Timer" buttons {"Close Minecraft", "Ask for More Time"} default button "Ask for More Time" with icon caution giving up after 300)
-    do shell script "echo " & quoted form of dialogResult & " > /tmp/minertimer_dialog_result.txt"
-on error
-    do shell script "echo TIMEOUT > /tmp/minertimer_dialog_result.txt"
+    do shell script "echo " & quoted form of dialogResult & " > '$RESULT_FILE'"
+on error errMsg
+    do shell script "echo TIMEOUT > '$RESULT_FILE'"
 end try
 EOF
+) 2>/dev/null &
             DIALOG_PID=$!
 
-            # Monitor for Minecraft relaunches while waiting for dialog response
+            # Monitor for Minecraft relaunches and grace expiration while waiting for dialog
             DIALOG_WAIT_COUNT=0
             MAX_WAIT=60  # 60 iterations of 5 seconds = 5 minutes
             while [ $DIALOG_WAIT_COUNT -lt $MAX_WAIT ]; do
                 # Kill any Minecraft instances during waiting period
+                CURRENT_EPOCH=$(date +%s)
                 kill_minecraft_instances
+
+                # Check if grace expired - if so, activate violation and break
+                if [ -n "$GRACE_EXPIRES_AT" ] && [ "$CURRENT_EPOCH" -ge "$GRACE_EXPIRES_AT" ]; then
+                    echo "$CURRENT_DATE" > "$VIOLATION_FILE"
+                    chmod 600 "$VIOLATION_FILE"
+                    VIOLATION_MODE=true
+                    GRACE_EXPIRES_AT=""
+                    echo "Grace expired during dialog. Violation activated."
+                    kill $DIALOG_PID 2>/dev/null
+                    rm -f "$RESULT_FILE"
+                    DIALOG_RESULT="TIMEOUT"
+                    break
+                fi
 
                 # Check if dialog completed
                 if ! kill -0 $DIALOG_PID 2>/dev/null; then
                     # Dialog finished, read result
                     sleep 1  # Give it a moment to write the file
+                    if [ -f "$RESULT_FILE" ]; then
+                        DIALOG_RESULT=$(cat "$RESULT_FILE" | tr -d '\r\n' | xargs)
+                        rm -f "$RESULT_FILE"
+                    else
+                        DIALOG_RESULT="TIMEOUT"
+                    fi
                     break
                 fi
 
@@ -244,14 +269,13 @@ EOF
                 DIALOG_WAIT_COUNT=$((DIALOG_WAIT_COUNT + 1))
             done
 
-            # Read dialog result
-            if [ -f /tmp/minertimer_dialog_result.txt ]; then
-                # Normalize dialog result to avoid trailing whitespace/newlines
-                DIALOG_RESULT=$(cat /tmp/minertimer_dialog_result.txt | tr -d '\r' | xargs)
-                rm -f /tmp/minertimer_dialog_result.txt
-            else
+            # If loop timed out, kill dialog and clean up
+            if [ $DIALOG_WAIT_COUNT -ge $MAX_WAIT ]; then
+                kill $DIALOG_PID 2>/dev/null
+                rm -f "$RESULT_FILE"
                 DIALOG_RESULT="TIMEOUT"
             fi
+
             echo "Dialog result: $DIALOG_RESULT"
 
             # If user clicked "Ask for More Time", start authentication process
