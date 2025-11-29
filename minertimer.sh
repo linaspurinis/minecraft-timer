@@ -196,18 +196,17 @@ while true; do
                 continue
             fi
             LIMIT_DIALOG_SHOWN=true
-            # Kill current instance before prompting, to enforce the grace window
-            kill_minecraft_instances
 
+            # DON'T kill Minecraft yet - let user keep playing while dialog is shown
             # Play sound and show notification
             afplay /System/Library/Sounds/Glass.aiff
-            say "Minecraft time has expired"
+            say "Minecraft time limit reached. Please ask for more time."
 
             # Create message
             PLAYTIME_MINUTES=$((TOTAL_PLAYED_TIME / 60))
             EXTENSION_MINUTES=$((EXTENSION_TIME / 60))
 
-            # Show nice GUI dialog with 5 minute timeout (Minecraft already closed)
+            # Show nice GUI dialog with 5 minute timeout (Minecraft STILL RUNNING)
             # Use a temp file to store result, and run dialog with timeout
             RESULT_FILE="/tmp/minertimer_dialog_$$_$(date +%s).txt"
             rm -f "$RESULT_FILE"
@@ -222,7 +221,9 @@ You've played Minecraft for $PLAYTIME_MINUTES minutes today.
 🎮 Want to keep playing?
 Ask a parent for approval!
 
-⏱️  Extension available: $EXTENSION_MINUTES more minutes" with title "⛏️  Minecraft Timer" buttons {"Close Minecraft", "Ask for More Time"} default button "Ask for More Time" with icon caution giving up after 300)
+⏱️  Extension available: $EXTENSION_MINUTES more minutes
+
+(You can keep playing while waiting for approval)" with title "⛏️  Minecraft Timer" buttons {"Close Minecraft", "Ask for More Time"} default button "Ask for More Time" with icon caution giving up after 300)
     do shell script "echo " & quoted form of dialogResult & " > '$RESULT_FILE'"
 on error errMsg
     do shell script "echo TIMEOUT > '$RESULT_FILE'"
@@ -231,13 +232,15 @@ EOF
 ) 2>/dev/null &
             DIALOG_PID=$!
 
-            # Monitor for Minecraft relaunches and grace expiration while waiting for dialog
+            # Monitor for grace expiration while waiting for dialog (Minecraft keeps running)
             DIALOG_WAIT_COUNT=0
             MAX_WAIT=60  # 60 iterations of 5 seconds = 5 minutes
             while [ $DIALOG_WAIT_COUNT -lt $MAX_WAIT ]; do
-                # Kill any Minecraft instances during waiting period
+                # DON'T kill Minecraft during dialog - let them keep playing
+                # But continue tracking playtime
                 CURRENT_EPOCH=$(date +%s)
-                kill_minecraft_instances
+                TOTAL_PLAYED_TIME=$((TOTAL_PLAYED_TIME + 5))
+                sed -i '' "2s/.*/$TOTAL_PLAYED_TIME/" "$LOG_FILE"
 
                 # Check if grace expired - if so, activate violation and break
                 if [ -n "$GRACE_EXPIRES_AT" ] && [ "$CURRENT_EPOCH" -ge "$GRACE_EXPIRES_AT" ]; then
@@ -247,6 +250,7 @@ EOF
                     GRACE_EXPIRES_AT=""
                     echo "Grace expired during dialog. Violation activated."
                     kill $DIALOG_PID 2>/dev/null
+                    kill_minecraft_instances
                     rm -f "$RESULT_FILE"
                     DIALOG_RESULT="TIMEOUT"
                     break
@@ -269,9 +273,10 @@ EOF
                 DIALOG_WAIT_COUNT=$((DIALOG_WAIT_COUNT + 1))
             done
 
-            # If loop timed out, kill dialog and clean up
+            # If loop timed out, kill dialog and Minecraft
             if [ $DIALOG_WAIT_COUNT -ge $MAX_WAIT ]; then
                 kill $DIALOG_PID 2>/dev/null
+                kill_minecraft_instances
                 rm -f "$RESULT_FILE"
                 DIALOG_RESULT="TIMEOUT"
             fi
@@ -681,6 +686,7 @@ Better luck next time!\" with title \"⛏️  Minecraft Closed\" buttons {\"OK\"
                 else
                     # No authentication enabled - should not happen
                     echo "No authentication method enabled."
+                    kill_minecraft_instances
                     osascript -e "display dialog \"⏰ TIME'S UP!
 
 Minecraft has been closed.
