@@ -202,6 +202,10 @@ while true; do
             afplay /System/Library/Sounds/Glass.aiff
             say "Minecraft time limit reached. Please ask for more time."
 
+            # Extend grace period for the dialog (5 minutes from now) so it doesn't expire during the initial dialog
+            GRACE_EXPIRES_AT=$(($(date +%s) + 300))
+            echo "Grace period set for dialog response (5 minutes)."
+
             # Create message
             PLAYTIME_MINUTES=$((TOTAL_PLAYED_TIME / 60))
             EXTENSION_MINUTES=$((EXTENSION_TIME / 60))
@@ -286,6 +290,10 @@ EOF
             # If user clicked "Ask for More Time", start authentication process
             if [[ $DIALOG_RESULT == "Ask for More Time"* ]]; then
 
+                # Extend grace period to give parent time to respond (5 more minutes from now)
+                GRACE_EXPIRES_AT=$(($(date +%s) + 300))
+                echo "Grace period extended for approval process (5 minutes)."
+
                 # Check if Telegram auth is enabled and configured
                 if [ "$ENABLE_TELEGRAM_AUTH" = true ] && [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
                     # TELEGRAM BUTTON AUTHENTICATION
@@ -329,7 +337,7 @@ Please ask a parent directly or try again.\" with title \"⛏️  Minecraft Time
                     # NOTE: We don't clear updates here! We want to catch the button click from the message we just sent
                     # Just get the current latest update_id to know where we are
                     INITIAL_CHECK=$(curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?limit=1")
-                    LAST_UPDATE=$(echo "$INITIAL_CHECK" | grep -o '"update_id":[0-9]*' | tail -1 | cut -d':' -f2)
+                    LAST_UPDATE=$(echo "$INITIAL_CHECK" | LC_ALL=C grep -o '"update_id":[0-9]*' | tail -1 | cut -d':' -f2)
                     if [ -z "$LAST_UPDATE" ]; then
                         OFFSET=0
                     else
@@ -358,8 +366,10 @@ EOF
 
                     if [ "$TELEGRAM_SEND_OK" = true ]; then
                     while [ $POLL_COUNT -lt $MAX_POLLS ]; do
-                        # CRITICAL: Kill any Minecraft instances launched during waiting period
-                        kill_minecraft_instances
+                        # DON'T kill Minecraft during approval wait - let them keep playing
+                        # Continue tracking playtime
+                        TOTAL_PLAYED_TIME=$((TOTAL_PLAYED_TIME + 5))
+                        sed -i '' "2s/.*/$TOTAL_PLAYED_TIME/" "$LOG_FILE"
 
                         # If grace expires while waiting, trigger violation immediately
                         if [ -n "$GRACE_EXPIRES_AT" ] && [ "$(date +%s)" -ge "$GRACE_EXPIRES_AT" ]; then
@@ -368,6 +378,7 @@ EOF
                             VIOLATION_MODE=true
                             GRACE_EXPIRES_AT=""
                             echo "Grace expired during approval wait. Violation activated."
+                            kill_minecraft_instances
                             break
                         fi
 
@@ -381,16 +392,16 @@ EOF
                         UPDATES=$(curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${OFFSET}&timeout=5")
 
                         # If polling fails (e.g., webhook still configured), log and break
-                        if echo "$UPDATES" | grep -q '"ok":false'; then
-                            ERROR_DESC=$(echo "$UPDATES" | grep -o '"description":"[^"]*"' | head -1 | cut -d'"' -f4)
+                        if echo "$UPDATES" | LC_ALL=C grep -q '"ok":false'; then
+                            ERROR_DESC=$(echo "$UPDATES" | LC_ALL=C grep -o '"description":"[^"]*"' | head -1 | cut -d'"' -f4)
                             echo "Telegram polling error: ${ERROR_DESC:-unknown error}"
                             break
                         fi
 
                         # Check if we got any updates
-                        if echo "$UPDATES" | grep -q "\"result\""; then
+                        if echo "$UPDATES" | LC_ALL=C grep -q "\"result\""; then
                             # Extract update ID first
-                            NEW_UPDATE_ID=$(echo "$UPDATES" | grep -o '"update_id":[0-9]*' | head -1 | cut -d':' -f2)
+                            NEW_UPDATE_ID=$(echo "$UPDATES" | LC_ALL=C grep -o '"update_id":[0-9]*' | head -1 | cut -d':' -f2)
 
                             # Update offset to not process this update again
                             if [ -n "$NEW_UPDATE_ID" ]; then
@@ -398,7 +409,7 @@ EOF
                             fi
 
                             # Check if it's a callback query
-                            if echo "$UPDATES" | grep -q "callback_query"; then
+                            if echo "$UPDATES" | LC_ALL=C grep -q "callback_query"; then
                                 # Parse callback data robustly (handles newlines/Unicode) via Python
                                 PY_OUT=$(UPDATES_JSON="$UPDATES" python3 - <<'PY'
 import json,os,sys
@@ -477,16 +488,6 @@ PY
                         BUTTON_RESULT="FAILED"
                     fi
 
-                    if [ "$VIOLATION_MODE" = true ]; then
-                        kill $DIALOG_PID 2>/dev/null
-                        kill_minecraft_instances
-                        sleep 60
-                        continue
-                    fi
-
-                    # No approval yet; allow the dialog to reappear on next loop within grace
-                    LIMIT_DIALOG_SHOWN=false
-
                     # Close the waiting dialog if still open
                     kill $DIALOG_PID 2>/dev/null
 
@@ -495,6 +496,16 @@ PY
                     if [[ $BUTTON_RESULT == "APPROVED" ]]; then
                         CODE_RESULT="SUCCESS"
                     fi
+
+                    # If violation mode activated AND no approval received, skip processing
+                    if [ "$VIOLATION_MODE" = true ] && [ "$CODE_RESULT" != "SUCCESS" ]; then
+                        kill_minecraft_instances
+                        sleep 60
+                        continue
+                    fi
+
+                    # No approval yet; allow the dialog to reappear on next loop within grace
+                    LIMIT_DIALOG_SHOWN=false
 
                     # Process result
                     if [[ $CODE_RESULT == "SUCCESS" ]]; then
