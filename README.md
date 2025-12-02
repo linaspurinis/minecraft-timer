@@ -48,6 +48,16 @@ with Approve/Deny buttons.
 
 ## Installation
 
+### Prerequisites
+
+**Xcode Command Line Tools** are required for this script to work properly. Install them with:
+
+```bash
+xcode-select --install
+```
+
+This will open a GUI dialog to install the tools. Click "Install" and wait for it to complete.
+
 ### 1. Download or Clone
 
 ```bash
