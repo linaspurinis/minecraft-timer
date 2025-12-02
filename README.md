@@ -206,8 +206,11 @@ sudo rm -rf /var/lib/minertimer
 # Check if daemon is running
 sudo launchctl list | grep com.purinis.minecrafttimer
 
-# Check logs
-tail -f /var/log/system.log | grep minertimer
+# Check normal logs (script output)
+tail -f /var/log/minertimer.log
+
+# Check error logs (if something goes wrong)
+tail -f /var/log/minertimer.error.log
 ```
 
 ### Minecraft not closing?
